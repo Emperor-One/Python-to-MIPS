@@ -1,0 +1,601 @@
+This is what's the translator.py file:
+
+"""
+HANDLES 
+    
+    IF,         uses conditionals, can be literal or variable
+    ELSE,               ``           ``           ``
+    FOR,                ``           ``           ``
+    WHILE,              ``           ``          ``
+    PRINT,      can take literals and variables as arguements
+    ARITHMETIC (Division is floor division)
+
+
+TODO: arithmetic is only one operation per line
+TODO: BETTER WHITESPACE HANDLING(TOO SENSITIVE BREAKS WITH SPACE AT WRONG PLACE)
+TODO: Change indent to eight spaces maybe...
+TODO: arithmetic operations in print
+
+no boolean values
+
+$t9 is for [for] loops
+$t8 is used for [conditionals](comparisons)
+
+remaining temp registers can be used for variables. keep it below 8 [$t0 - $t7]
+
+conditionals need space between em
+    i.e if (5 < 4)          
+        will break otherwise
+"""
+
+
+
+
+
+count = 0       #make sure the label names are unique among loops
+pcount = 0      #For Asciiz labels on print calls
+
+tokens = ['+','/','*','-']          
+#the 4 basic ops. should maybe add modulo and ground
+types = ["String", "int", "char"]   
+#declerations
+
+end = ""
+indent = " "*4
+
+variables = {}
+var_count = 0
+variable_mapping = []
+    
+
+# what the program will translate
+# only these will be supported
+functions = ["System.out.println", "if", "else", "while", "for"]
+# DONE: PRINT, IF, WHILE
+
+
+# maps operations to their mips equivalent
+# just access token[the operation] to get its mips equivalent
+token = {
+    "+":"add",
+    "-": "sub",
+    "/": "div",
+    "*": "mul"
+}
+
+# not in the scope of what we're doing
+useless = ["public", "class"]
+
+operations = {'>':"bgt", '>=':'bge', '<':'blt', '<=':'ble', '==':'beq'}
+
+data_segment = "\n\n#beginning of data segment\n.data \n"
+
+
+# ````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````
+def function_translator(function):
+    # isolates the function
+    l = function
+    global count
+    global pcount
+    global end
+    function = function.split('\n')
+    solution = ''
+    for i in range(len(function)):
+        function[i] = function[i].strip()
+
+    if 'for' in function[0]:
+        solution+="\n#FOR LOOP\n#INITIALIZE FIRST\n"
+        term = l.strip().translate( { ord(")"): " ", ord("("): " ", ord("}"): None, ord("{"): None }).split()
+        initial = term[3]   #variable
+        init = term[4]  #value for the variable
+        
+        # initialize
+        solution += indent + "li {i} {val}\n".format(i = "$t9", val = init.translate({ord(';'): None}))        
+
+
+        op = term[5]
+        o = term[6]
+        op2 = term[7]
+
+        print(term)
+        # while body
+        solution += "link{count}:\n".format(count = count)
+        solution += indent+"{op} {op1} {op2} while{count}\n".format(op = operations[o], op1 = "$t9", op2 = op2.translate({ord(';'): None}), count = count)
+        solution += indent+"j normal{count}\n".format(count=count)
+        solution += "while{count}:\n".format(count = count)
+        solution += indent + "addi $t9 $t9 {val}\n".format(val = term[12])
+        end = indent + "j link{count}\nnormal{count}:\n".format(count = count)
+
+
+        # solution += indent + "{o} {op} {op2} loop{count}\n".format(o = operations[o], op = op, op2 = op2, count = count)
+        return solution
+    
+
+
+    
+    if ('if') in function[0]:
+        solution+=("\n#IF CONDITION BEGINS HERE\n")
+        op = ''
+        term = l.strip().translate( { ord(")"): " ", ord("("): " ", ord("}"): None, ord("{"): None }).split()
+        print(term)
+        op1 = term[1]
+        op2 = term[3]
+
+        if '<=' in l:
+            op = 'ble'
+        elif '<' in l:
+            op = 'blt'
+        if '>=' in l:
+            op = 'bge'
+        elif '>' in l:
+            op = 'bgt'
+        if '==' in l:
+            op = 'beq'
+
+        operation1 = "li"
+        operation2 = "li"
+        if op2 in variables:
+            op2 = variables[op2]
+            operation2 = "move"
+            solution += indent+"{operation} $t8 {op2}\n".format(op2 = op2, operation = operation2)
+        if op1 in variables:
+            op1 = variables[op1]
+            operation1 = "move"
+
+        solution += indent+"{operation} $t7 {op}\n".format(op = op1, operation = operation1)
+        
+
+        solution += indent+"{op} $t7 {op2} if{count}\n".format(op = op, count = count, op2=op2)
+        solution += indent+"j else{count}\n".format(count = count)
+        solution += "if{count}:\n".format(count = count)
+        end = indent+"j normal{count}\nelse{count}:\n".format(count=count)
+        return(solution)
+
+
+
+
+
+    if ('else') in function[0]:
+        end = "normal{count}:\n".format(count=count-1)
+        solution = "#ELSE CONDITION. ONLY REACHED IF [IF] ISNT EXECUTED.\n"
+        return solution
+
+
+
+    if ('System.out.println') in function[0]:
+        solution += "\n#PRINT STATEMENT. USES DIFFERENT OPCODE FOR INT AND STRINGS\n"
+
+        term = l.strip().split('"')
+        term2 = l.strip().translate( { ord(")"): "|", ord("("): "|", ord("}"): None, ord("{"): None }).split('|')
+
+        # print ("TERM2",term2)
+
+        if '"' not in term2[1]:
+            # determine if the variable is a string or a number
+            if term2[1] in variables:
+                x = variables[term2[1]]
+                if '$t' in x:
+                    op = 1
+                    load = "move"
+                else:
+                    op = 4
+                    load = "la"
+            else:
+                x = int(term2[1])
+                op = 1
+                load = "li"
+
+        else:
+            x = "ToPrint{pcount}".format(pcount = pcount)
+            # print("TERM",term)
+            global data_segment
+            data_segment = data_segment + "ToPrint{pcount}:\n".format(pcount=pcount)
+            op = 4
+            load = "la"
+            data_segment += (indent+ r'.asciiz "{string}\n"'.format(string = term[1])+"\n")
+            pcount+=1
+        
+        solution += indent+'li $v0 {op}\n'.format(op = op)
+        solution += indent+ '{load} $a0 {val}\n'.format(val = x, load = load)
+        solution += indent+"syscall\n\n"
+        return(solution)
+
+
+
+    if 'while' in function[0]:
+        solution += "\n#WHILE LOOP. LINK IS THE CONDITION. WHILE IS THE BODY OF THE LOOP. NORMAL IS THE REST OF THE PROGRAM\n"
+        solution += "#NUMBERED LABELS TO AVOID CONFLICTS IF THERE IS ANOTHER LOOP\n"
+        op = ''
+        term = l.strip().translate( { ord(")"): " ", ord("("): " ", ord("}"): None, ord("{"): None }).split()
+        print(term)
+        op = ''
+        if '<=' in l:
+            op = 'ble'
+        elif '<' in l:
+            op = 'blt'
+        if '>=' in l:
+            op = 'bge'
+        elif '>' in l:
+            op = 'bgt'
+        if '==' in l:
+            op = 'beq'
+
+        op1 = term[1]
+        op2 = term[3]
+        
+        if op2 in variables:
+            op2 = variables[op2]
+        if op1 in variables:
+            op1 = variables[op1]
+        
+
+
+        solution += "link{count}:\n".format(count = count)
+        solution += indent+"{op} {op1} {op2} while{count}\n".format(op = op, op1 = op1, op2 = op2, count = count)
+        solution += indent+"j normal{count}\n".format(count=count)
+        solution += "while{count}:\n".format(count = count)
+        end = indent + "j link{count}\n".format(count = count)
+        end += "normal{i}: \n".format(i=str(count))
+        return(solution)
+
+    # print(l)
+# ``````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````
+
+
+
+
+
+# PARSER
+#just wrapped everything in a function
+def parser(java_code):
+    with open('assembly.asm', 'w') as asm_file:
+        # just opens the output dir. 
+        # indented but not exactly nested
+
+        data_variables = []
+        global variables
+        global var_count
+        global end
+        global count
+        global data_segment
+
+        # trackers for functions
+        function = ''
+        mode = 0
+        stor = 'a'
+
+        #Opens java file to write mode so that it can write the input in the java file
+        with open('java.java', 'w') as write_java:
+            write_java.write(java_code)
+
+        with open('java.java') as java:
+            asm_file.write(".text \n.globl main \n\nmain:\n")
+
+            while line := java.readline():
+                temp = line
+
+
+                if line.strip() == '':
+                    continue
+
+                line = line.translate( { ord(";"): None } )
+                # variables = []
+                mapping = []
+                strings = {}
+                op = ""     #stores the operation we're using(add, sub,...)
+
+                ln = line.split()
+                ln[:] = (value for value in ln if value != '')
+                # print(ln)
+
+
+                # found one of the functions. sent its first line to the translator function
+                if ln[0] in functions or "System.out.println" in ln[0] or 'else' in ln[0]:
+                    mode = 1
+                    function += temp
+                    sol = function_translator(function)
+                    asm_file.write(sol)
+                    function = ''
+                    continue
+
+
+                if mode == 1:   #function termination check
+                    if '}' in line:
+                        asm_file.write(end)
+                        end = ""
+                        # asm_file.write("normal{i}: \n".format(i=str(count)))
+                        mode = 0
+                        count += 1
+                        pass
+
+
+
+
+                l = line.strip().translate( { ord(")"): None, ord("("): " ", ord("}"): None, ord("{"): None }).split()
+
+
+                if len(l)>0 and l[0] in functions:
+                    mode = 1
+
+                operand_stack = []
+
+                # print(ln)
+
+
+                for i in range(len(ln)):
+                    term = ln[i]
+                    # print(ln)
+                    if term == "String":
+                        # found a string
+                        #only thing doable in this line is assigning a string
+                        # print(ln)
+                        chk = line.strip().translate({ ord('"'): "|"}).strip('|').split('|')
+                        # print(chk[1] + r'\n')
+                        # print(chk)
+                        stor = ln[i+1]
+                        # val = ln[i+3]
+                        # for i in range(i+4, len(ln)):
+                        #     val += " " + ln[i]
+                        val = '"{x}"'.format(x=chk[1] + r'\n')
+                        data_segment += "{stor}:\n".format(stor = stor) + indent + ".asciiz {val}\n".format(val=val)
+                        variables[stor] = stor
+                        break         
+                    
+                    if ';' in term:
+                        term = term.split(';')[0]
+                        continue
+
+                    if term in types:
+                        continue
+
+                    if term in tokens:
+                        op = token[term]
+                        continue
+
+                    if term in useless:
+                        # a class declaration of a method decleration. Not in the scope of this program
+                        # expects all code to be translated to be in one class
+                        break
+
+                    if term == "=":
+                        stor = ln[i-1]
+                        # print("the stor:   " + stor)
+                        # if there is no operation in the line, its assignment
+                        continue
+
+                    try:
+                        # check if uve run into a number(int)
+                        x = int(term)
+                        # uve run into a number
+                        # store it in operands
+                        # print(type(x))
+                        operand_stack.append(x)
+
+                    except:
+                        if term in variables:
+                            operand_stack.append(term)
+                        if (term =="\n" or term =="}\n" or term =="}"):
+                            continue
+
+                        # not a number. must be a var
+                        # print(variables[term])
+                        if term not in variables:
+                            variables[term] = "$t{count}".format(count=var_count)
+                            var_count += 1
+                        pass
+
+
+                if (op):
+                    # print(operand_stack)
+                    # print(op)
+                    second = operand_stack.pop()
+                    first = operand_stack.pop()
+                    if second in variables:
+                        second = variables[second]
+                    else:
+                        asm_file.write(indent+"li $s0 {var}\n".format(var = second))
+                        second = '$s0'
+
+                    if first in variables:
+                        first = variables[first]
+                    else: 
+                        asm_file.write(indent+"li {stor} {var}\n".format(var = first, stor = variables[stor]))
+                        first = variables[stor]
+
+                    asm_file.write(indent + "{op} {stor} {first} {second}\n".format(op = op, stor = variables[stor], second = second, first = first))
+
+
+        finale = "\n"+indent+"li $v0 10\n"+indent+"syscall\n"
+        asm_file.write(finale)
+        asm_file.write(data_segment)
+        # print_variables = "\n\n\n#VARIABLE MAPPINGS:  " + str(variables)
+        # asm_file.write(print_variables)
+    with open('assembly.asm') as asm_file:               
+        return asm_file.read()
+
+
+
+# ````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````
+
+def reset():
+    global count
+    global pcount
+    global end
+    global indent
+    global variables
+    global var_count
+    global variable_mapping
+    global data_segment 
+
+    data_segment = "\n\n#beginning of data segment\n.data \n"
+    count = 0       #make sure the label names are unique among loops
+    pcount = 0      #For Asciiz labels on print calls
+
+    end = ""
+    indent = " "*4
+
+    variables = {}
+    var_count = 0
+    variable_mapping = []
+
+And, This is what's in the gui.py file:
+
+import tkinter as tk
+import subprocess
+import translator
+
+class Main:
+    def __init__(self):
+        # Create the main window
+        self.root = tk.Tk()
+
+        # Set the window title
+        self.root.title("Java-MIPS Translator")
+
+        # Make the window fullscreen
+        self.root.state("zoomed")
+
+        # Configure rows and columns to expand and fill available space
+        self.root.grid_rowconfigure(1, weight=1)
+        self.root.grid_columnconfigure(0, weight=2)
+        self.root.grid_columnconfigure(1, weight=1)
+        self.root.grid_columnconfigure(2, weight=2)
+        self.root.grid_rowconfigure(5, weight=1)
+
+        # Create a label for the Java text box
+        java_label = tk.Label(self.root, text="Java Code", font=("Arial", 14))
+        java_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+
+        # Create the Java text box
+        self.java_text = tk.Text(self.root, width=90, height=20)
+        self.java_text.grid(row=1, column=0, padx=5, pady=5, sticky="nsew")
+
+        # Create a Java output box
+        java_output_label = tk.Label(self.root, text="Java Output", font=("Arial", 14))
+        java_output_label.grid(row=3, column=0, padx=5, pady=5, sticky="w")
+        self.java_output = tk.Text(self.root, width=90, height=10, state=tk.DISABLED)
+        self.java_output.grid(row=4, column=0, padx=5, pady=5, sticky="nsew")
+
+        # Create a line separator
+        line = tk.Canvas(self.root, width=2, height=750, bg="gray")
+        line.grid(row=0, column=1, rowspan=5, padx=5, pady=5, sticky="ns")
+
+        # Create a label for the MIPS text box
+        mips_label = tk.Label(self.root, text="MIPS Code", font=("Arial", 14))
+        mips_label.grid(row=0, column=2, padx=5, pady=5, sticky="w")
+
+        # Create the MIPS text box
+        self.mips_text = tk.Text(self.root, width=90, height=20, state=tk.NORMAL)
+        self.mips_text.grid(row=1, column=2, padx=5, pady=5, sticky="nsew")
+
+        # Create a MIPS output box
+        mips_output_label = tk.Label(self.root, text="MIPS Output", font=("Arial", 14))
+        mips_output_label.grid(row=3, column=2, padx=5, pady=5, sticky="w")
+        self.mips_output = tk.Text(self.root, width=90, height=10, state=tk.DISABLED)
+        self.mips_output.grid(row=4, column=2, padx=5, pady=5, sticky="nsew")
+
+        # Create the Run Java button
+        java_button = tk.Button(self.root, text="Run Java", command=self.run_java, width=10, height=2)
+        java_button.grid(row=6, column=0, padx=5, pady=5, sticky="w")
+
+        # Create the Translate button
+        translate_button = tk.Button(self.root, text="Translate", command=self.translate, width=10, height=2)
+        translate_button.grid(row=6, column=0, padx=5, pady=5, sticky="e")
+
+        # Create the Run MIPS button
+        mips_button = tk.Button(self.root, text="Run MIPS", command=self.run_mips, width=10, height=2)
+        mips_button.grid(row=6, column=2, padx=5, pady=5, sticky="w")
+
+        # Create the Clear button
+        clear_button = tk.Button(self.root, text="Clear", command=self.clear, width=10, height=2)
+        clear_button.grid(row=6, column=2, padx=5, pady=5, sticky="e")
+
+    def run_java(self):
+        """
+        Runs the Java code and displays the output in the Java output box.
+        """
+        java_code = self.java_text.get("1.0", tk.END)
+        java_output = run_java_code(java_code)
+        print(java_output)
+        self.java_output.config(state=tk.NORMAL)
+        self.java_output.delete("1.0", tk.END)
+        self.java_output.insert(tk.END, java_output)
+        self.java_output.config(state=tk.DISABLED)
+
+    def translate(self):
+        """
+        Translates the Java code to MIPS and displays the output in the MIPS Code box.
+        """
+        java_code = self.java_text.get("1.0", tk.END)
+        mips_code = translate_to_mips(java_code)
+        self.mips_text.delete("1.0", tk.END)
+        self.mips_text.insert(tk.END, mips_code)
+
+    def run_mips(self):
+        mips_code = self.mips_text.get("1.0", tk.END)
+        mips_output = run_mips_code(mips_code)
+        self.mips_output.config(state=tk.NORMAL)
+        self.mips_output.delete("1.0", tk.END)
+        self.mips_output.insert(tk.END, mips_output)
+        self.mips_output.config(state=tk.DISABLED)
+
+    def clear(self):
+        """
+        Clears both the Java and MIPS text boxes and output boxes.
+        """
+        reset()
+        self.java_text.delete("1.0", tk.END)
+        self.java_output.config(state=tk.NORMAL)
+        self.java_output.delete("1.0", tk.END)
+        self.java_output.config(state=tk.DISABLED)
+        self.mips_text.delete("1.0", tk.END)
+        self.mips_output.config(state=tk.NORMAL)
+        self.mips_output.delete("1.0", tk.END)
+        self.mips_output.config(state=tk.DISABLED)
+
+
+    def start(self):
+        """
+        Starts the GUI application.
+        """
+        self.root.mainloop()
+
+import subprocess
+
+def run_java_code(java_code):
+    # Write the code to a file
+    with open('java.java', 'w') as java_file:
+        java_file.write(java_code)
+    # Compile the code
+    compile_result = subprocess.run(['javac', 'java.java'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if compile_result.returncode != 0:
+        # There was an error during compilation
+        error_message = compile_result.stderr.strip()
+        return error_message
+    # Run the code and capture the output
+    result = subprocess.run(['java', 'java'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    # Return the output as a dictionary with separate keys for stdout and stderr
+    return result.stdout + result.stderr
+
+
+
+def run_mips_code(mips_code):
+    # Write the code to a file
+    with open('assembly.asm', 'w') as assembly_file:
+        assembly_file.write(mips_code)
+    
+    # Run MARS as a subprocess
+    result = subprocess.run(['java', '-jar', 'Mars4_5.jar', 'assembly.asm'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    
+    # Return the output as a dictionary with separate keys for stdout and stderr
+    return result.stdout + result.stderr
+
+def reset():
+    translator.reset()
+
+def translate_to_mips(java_code):
+    reset()
+    return translator.parser(java_code)
+
+app = Main()
+app.start()
